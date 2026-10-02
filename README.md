@@ -4,7 +4,8 @@
 
 **Cross-session messaging for opencode.**
 
-![npm](https://img.shields.io/npm/v/opencode-peers)
+[![npm](https://img.shields.io/npm/v/opencode-peers)](https://www.npmjs.com/package/opencode-peers)
+[![Downloads](https://img.shields.io/npm/dm/opencode-peers)](https://www.npmjs.com/package/opencode-peers)
 ![Node](https://img.shields.io/badge/node-%E2%89%A518-339933?logo=nodedotjs&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
 </div>
@@ -60,12 +61,15 @@ instances stay distinguishable. `/peers-name` or the `name` option replaces it.
 
 ## ⚙️ Settings
 
-On OpenCode 2.x, pass options via the `plugins` object form. On v1, use the
-tuple form:
+Register the plugin in config by package name — `plugins` on OpenCode 2.x, the
+singular `plugin` key on v1 — and carry options in the object/tuple form:
 
 ```json
-{ "plugins":  [ { "package": "opencode-peers", "options": { "inboundPolicy": "hold", "name": "frontend" } } ] }
-{ "plugin":   [ [ "opencode-peers", { "inboundPolicy": "hold", "name": "frontend" } ] ] }
+{ "plugins": ["opencode-peers"] }
+{ "plugin":  ["opencode-peers"] }
+
+{ "plugins": [ { "package": "opencode-peers", "options": { "inboundPolicy": "hold", "name": "frontend" } } ] }
+{ "plugin":  [ [ "opencode-peers", { "inboundPolicy": "hold", "name": "frontend" } ] ] }
 ```
 
 | Option | Default | What it does |
@@ -86,42 +90,30 @@ tuple form:
 
 ## 📦 Install
 
-Requires opencode >= 1.18.29 (v1) or OpenCode 2.x (v2).
+One package, two hosts — pick your host's command:
 
 ```bash
-opencode plugin -g opencode-peers
+opencode plugin add opencode-peers    # OpenCode 2.x (v2)
+opencode plugin -g opencode-peers     # opencode v1 (>= 1.18.29)
 ```
 
-or in `opencode.json`:
+Config-based registration and options live in the Settings section below.
 
-```json
-{ "plugins": ["opencode-peers"] }
+Development checkout:
+
+```bash
+git clone https://github.com/chinese-room-solutions/opencode-peers
+cd opencode-peers && make build
 ```
 
-Notes:
+```jsonc
+// ~/.config/opencode/opencode.jsonc
+{ "plugins": ["/abs/path/to/opencode-peers"] }
+```
 
-- Local/file plugin references must point at the package **directory** (or an
-  npm name), never a single `dist/index.js` file — v2 rejects file paths with
-  `configured plugin path must be a directory`.
-- **Single-Enter commands on v1**: the TUI loads plugins from
-  `~/.config/opencode/tui.json` (a separate list from `opencode.json`), so add
-  the package there too. Without it everything works. Commands just keep the
-  default two-Enter behavior. On v2 this works out of the box.
-- Development checkout:
-
-  ```bash
-  git clone https://github.com/chinese-room-solutions/opencode-peers
-  cd opencode-peers && npm install && npm run build
-  ```
-
-  ```jsonc
-  // ~/.config/opencode/opencode.jsonc
-  { "plugins": ["/abs/path/to/opencode-peers"] }
-  ```
-
-  On v1 hosts the old trick still applies — symlink the built entry into the
-  global plugins directory:
-  `ln -sf "$PWD/dist/index.js" ~/.config/opencode/plugins/opencode-peers.js`.
+Point v2 hosts at the package directory, never `dist/index.js`. On v1, symlink
+instead:
+`ln -sf "$PWD/dist/index.js" ~/.config/opencode/plugins/opencode-peers.js`.
 
 ## 🔒 Security
 
@@ -185,7 +177,3 @@ forked at v0.2.3 and extended with OpenCode v2 support, event-driven
 discovery, synthetic delivery, and evaluate-hook permissions. The original
 project is MIT-licensed. Its copyright notice is preserved in the
 [LICENSE](./LICENSE) file as its license requires.
-
-## License
-
-MIT — see [LICENSE](./LICENSE).
