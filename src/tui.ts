@@ -1,0 +1,334 @@
+import type { TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
+import type { Plugin } from "@opencode/plugin/tui"
+
+/**
+ * TUI entrypoint (loaded via package.json exports["./tui"]).
+ *
+ * Server-defined slash commands never execute on the first Enter in the
+ * opencode TUI — selecting one in the autocomplete only inserts "/name " and
+ * waits for a second Enter. To get single-Enter execution WITHOUT a duplicate
+ * autocomplete row, this module does two things:
+ *
+ *  1. Registers the five commands as palette commands (no `slashName`, so
+ *     they do NOT add rows to the autocomplete — the menu keeps only the
+ *     server-defined row).
+ *  2. Registers a high-priority "return" binding whose handler checks the
+ *     focused prompt's text. When it is exactly one of our slash commands
+ *     (no arguments), the handler executes it via `client.session.command`
+ *     — the same `command.execute.before` interception as a normal submit —
+ *     and reports the key handled. On the home route (no session yet) it
+ *     first creates a session and navigates to it, replicating the stock
+ *     home-submit flow. For any other text it returns `false`, and the
+ *     keymap falls through to the normal bindings (autocomplete select /
+ *     input submit), so every other keypress behaves exactly as stock.
+ *
+ * Commands typed WITH arguments (e.g. `/peers-name foo`) never match the
+ * exact-text check, so they submit normally with the argument intact.
+ *
+ * CONSTRAINT: this file must compile to a zero-runtime-import dist/tui.js.
+ * `@opencode-ai/plugin/tui` re-exports @opentui/keymap at runtime, which is
+ * not resolvable inside the TUI process — `import type` only. The same goes
+ * for `@opencode/plugin/tui` (the v2 CLI plugin host below), which drags
+ * solid-js along. That is also why the command names are duplicated here
+ * instead of imported from ./index.js (which would drag the whole server
+ * dependency chain along).
+ */
+const COMMANDS = [
+  { cmd: "peers", title: "List peers", desc: "List same-machine opencode peers" },
+  { cmd: "list-agents", title: "List agents", desc: "Alias of /peers" },
+  { cmd: "peers-name", title: "Show/set peer name", desc: "Show or set this instance's peer name" },
+  { cmd: "peers-inbox", title: "Peer inbox", desc: "Review held peer messages" },
+  { cmd: "peers-outbox", title: "Peer outbox", desc: "Review peer delivery acknowledgements" },
+] as const
+
+const EXACT = new Set<string>(COMMANDS.map(({ cmd }) => `/${cmd}`))
+
+/** Must outrank the autocomplete's select binding (the TUI uses 0..1). */
+const LAYER_PRIORITY = 10
+
+/** Minimal structural view of the focused renderable (a TextareaRenderable). */
+type FocusedText = { plainText?: unknown; setText?: (text: string) => void }
+
+/**
+ * Slash-typeable names that are NOT ours (server-defined commands + TUI slash
+ * entries). Used to decide whether a partially typed name uniquely highlights
+ * one of our rows in the autocomplete. Refreshed opportunistically; while it
+ * is unknown we stay conservative and only intercept exact matches.
+ */
+let otherNames: Set<string> | null = null
+let otherNamesAt = 0
+
+async function refreshOtherNames(api: TuiPluginApi): Promise<void> {
+  try {
+    const names = new Set<string>()
+    const res = await api.client.command.list()
+    for (const c of (res as { data?: { name?: string }[] }).data ?? []) {
+      if (c?.name) names.add(c.name)
+    }
+    const km = api.keymap as unknown as {
+      getCommandEntries?: (q?: unknown) => readonly { command: Record<string, unknown> }[]
+    }
+    for (const e of km.getCommandEntries?.({ visibility: "reachable", namespace: "palette" }) ?? []) {
+      const slash = e.command?.slashName
+      if (typeof slash === "string" && slash) names.add(slash)
+      const aliases = e.command?.slashAliases
+      if (Array.isArray(aliases)) for (const a of aliases) if (typeof a === "string" && a) names.add(a)
+    }
+    for (const { cmd } of COMMANDS) names.delete(cmd)
+    otherNames = names
+    otherNamesAt = Date.now()
+  } catch {
+    // Keep the previous (possibly empty) cache; a retry happens on the next Enter.
+  }
+}
+
+/**
+ * Resolve the prompt text to one of our command names, or return null.
+ * Exact matches always resolve. A partial name resolves only when it is a
+ * prefix of exactly one of our commands and of no other slash-typeable name —
+ * i.e. when our row is the unambiguous highlighted autocomplete entry (the
+ * TUI's scorer doubles prefix matches, so that entry is strictly on top).
+ */
+function resolveTyped(text: string): string | null {
+  if (EXACT.has(text)) return text.slice(1)
+  if (!text.startsWith("/")) return null
+  const name = text.slice(1)
+  if (!name || /\s/.test(name)) return null
+  const ours = COMMANDS.filter(({ cmd }) => cmd.startsWith(name))
+  if (ours.length !== 1) return null
+  if (!otherNames) return null
+  for (const n of otherNames) {
+    if (n.startsWith(name)) return null
+  }
+  return ours[0].cmd
+}
+
+async function runCommand(api: TuiPluginApi, command: string, commandArguments = ""): Promise<void> {
+  const route = api.route.current
+  let sessionID =
+    route.name === "session"
+      ? (route.params as { sessionID?: string } | undefined)?.sessionID
+      : undefined
+  try {
+    if (!sessionID) {
+      // Home route: replicate the stock submit flow — create a session,
+      // switch to it, then run the command there. Server defaults apply
+      // for agent/model; our commands are consumed before any model call.
+      const res = await api.client.session.create()
+      sessionID = (res as { data?: { id?: string } }).data?.id
+      if (!sessionID) throw new Error("session.create returned no session id")
+      api.route.navigate("session", { sessionID })
+    }
+    await api.client.session.command({ sessionID, command, arguments: commandArguments })
+  } catch (err) {
+    api.ui.toast({
+      variant: "error",
+      title: `/${command} failed`,
+      message: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
+type DialogApi = {
+  DialogSelect: (props: { title: string; options: Array<{ title: string; value: string; description?: string }> }) => Promise<string | null | undefined>
+  DialogPrompt: (props: { title: string; placeholder?: string; value?: string }) => Promise<string | null | undefined>
+  DialogConfirm: (props: { title: string; message: string }) => Promise<boolean>
+}
+
+async function runControl(api: TuiPluginApi, command: string): Promise<void> {
+  const dialogs = api.ui as unknown as DialogApi
+  if (command === "peers-name") {
+    const name = (await dialogs.DialogPrompt({ title: "Rename this peer", placeholder: "1-32 safe characters" }))?.trim()
+    if (!name) return
+    if (!(await dialogs.DialogConfirm({ title: "Confirm peer rename", message: `Rename this peer to "${name}"?` }))) return
+    return runCommand(api, command, name)
+  }
+  if (command === "peers-inbox") {
+    const action = await dialogs.DialogSelect({
+      title: "Peer inbox action",
+      options: [
+        { title: "List held messages", value: "list" },
+        { title: "Accept held message", value: "accept" },
+        { title: "Drop held message", value: "drop" },
+      ],
+    })
+    if (!action) return
+    if (action === "list") return runCommand(api, command)
+    const target = (await dialogs.DialogPrompt({ title: `${action === "accept" ? "Accept" : "Drop"} which message?`, placeholder: "number or all" }))?.trim()
+    if (!target || (!/^\d+$/.test(target) && target !== "all")) return
+    if (action === "drop" && !(await dialogs.DialogConfirm({ title: "Confirm message drop", message: `Permanently drop held message ${target}?` }))) return
+    return runCommand(api, command, `${action} ${target}`)
+  }
+  const selected = await dialogs.DialogSelect({
+    title: command === "peers-outbox" ? "Peer outbox" : "Peer sessions",
+    options: [{ title: command === "peers-outbox" ? "View delivery status" : "List peer sessions", value: "list" }],
+  })
+  if (selected !== "list") return
+  return runCommand(api, command)
+}
+
+/**
+ * Sync Enter handler: returns true (handled) only when the focused prompt
+ * holds exactly one of our commands; anything else returns false so the
+ * keymap falls through to the stock bindings. Must stay synchronous — a
+ * Promise result is always treated as handled by the keymap.
+ */
+function onEnter(api: TuiPluginApi, ctx: { focused: unknown }): boolean {
+  // Never hijack Enter inside dialogs (rename prompts, palette search, …).
+  if (api.ui.dialog.open) return false
+  const route = api.route.current
+  // Only the session prompt and the home prompt are command-entry points;
+  // plugin routes and anything else keep stock behavior.
+  if (route.name !== "session" && route.name !== "home") return false
+  const focused = ctx.focused as FocusedText | null
+  if (typeof focused?.plainText !== "string") return false
+  if (Date.now() - otherNamesAt > 60_000) void refreshOtherNames(api)
+  const command = resolveTyped(focused.plainText.trim())
+  if (!command) return false
+  try {
+    focused.setText?.("")
+  } catch {
+    // Cosmetic only — prompt.clear below is the fallback.
+  }
+  // Drop the typed text from the prompt store as well, like a normal submit.
+  try {
+    api.keymap.dispatchCommand("prompt.clear")
+  } catch {
+    // Command name may change in a future opencode version.
+  }
+  void runCommand(api, command)
+  return true
+}
+
+/**
+ * V2 CLI plugin entry (`@opencode/plugin/tui` `Definition`), registered
+ * alongside the v1 `tui(api)` on the SAME default export: a v1 host calls
+ * `tui(api)` and ignores `setup`; a v2 host calls `setup(context)` and
+ * ignores `tui`. Both imports are `import type`, so everything below runs
+ * only on what arrives through `context` — keeping dist/tui.js free of
+ * runtime imports.
+ *
+ * Unlike v1, the slash entries themselves are registered here (`slash` on
+ * each command, with `arguments: true` so the raw typed argument reaches
+ * `run`). The server-side /peers* commands are registered separately by the
+ * server plugin and executed via `client.session.command`. Palette
+ * invocations (no typed argument) open the same interactive dialog flows as
+ * v1; slash invocations WITH arguments run the command directly.
+ */
+
+/** Commands executed server-side via session.command (see commands/*.md). */
+const V2_COMMANDS = [
+  { cmd: "peers", title: "List peers", aliases: ["list-agents"] },
+  { cmd: "peers-name", title: "Show/set peer name", aliases: undefined },
+  { cmd: "peers-inbox", title: "Peer inbox", aliases: undefined },
+  { cmd: "peers-outbox", title: "Peer outbox", aliases: undefined },
+] as const
+
+async function runV2Command(context: Plugin.Context, name: string, text: string): Promise<void> {
+  const route = context.ui.router.current()
+  let sessionID = route.type === "session" ? route.sessionID : undefined
+  try {
+    if (!sessionID) {
+      // Home route: mirror the v1 flow — create a session, switch to it,
+      // then run the command there.
+      const session = await context.client.session.create({})
+      sessionID = session?.id
+      if (!sessionID) throw new Error("session.create returned no session id")
+      context.ui.router.navigate({ type: "session", sessionID })
+    }
+    await context.client.session.command({ sessionID, name, text })
+  } catch (err) {
+    context.ui.toast.show({
+      title: `/${name} failed`,
+      message: err instanceof Error ? err.message : String(err),
+      variant: "error",
+    })
+  }
+}
+
+/** Interactive dialog flow for palette invocations (no typed argument). */
+async function runV2Control(context: Plugin.Context, command: string): Promise<void> {
+  const dialog = context.ui.dialog
+  if (command === "peers-name") {
+    const name = (await dialog.prompt({ title: "Rename this peer", placeholder: "1-32 safe characters" }))?.trim()
+    if (!name) return
+    if (!(await dialog.confirm({ title: "Confirm peer rename", message: `Rename this peer to "${name}"?` }))) return
+    return runV2Command(context, command, name)
+  }
+  if (command === "peers-inbox") {
+    const action = await dialog.select({
+      title: "Peer inbox action",
+      options: [
+        { title: "List held messages", value: "list" },
+        { title: "Accept held message", value: "accept" },
+        { title: "Drop held message", value: "drop" },
+      ],
+    })
+    if (!action) return
+    if (action === "list") return runV2Command(context, command, "")
+    const target = (
+      await dialog.prompt({ title: `${action === "accept" ? "Accept" : "Drop"} which message?`, placeholder: "number or all" })
+    )?.trim()
+    if (!target || (!/^\d+$/.test(target) && target !== "all")) return
+    if (action === "drop" && !(await dialog.confirm({ title: "Confirm message drop", message: `Permanently drop held message ${target}?` }))) {
+      return
+    }
+    return runV2Command(context, command, `${action} ${target}`)
+  }
+  // peers / peers-outbox take no parameters: run immediately.
+  return runV2Command(context, command, "")
+}
+
+function v2Setup(context: Plugin.Context): Plugin.Cleanup | undefined {
+  const registered: unknown = context.keymap.layer(() => ({
+    mode: "global",
+    priority: LAYER_PRIORITY,
+    commands: V2_COMMANDS.map(({ cmd, title, aliases }) => ({
+      id: `opencode-peers.${cmd}`,
+      title,
+      palette: true,
+      slash: {
+        name: cmd,
+        ...(aliases ? { aliases: [...aliases] } : {}),
+        arguments: true,
+      },
+      run: (input?: string) => {
+        // Slash invocations typed WITH arguments run the command directly;
+        // an empty/absent argument means a palette invocation and opens the
+        // interactive dialog flow.
+        const text = typeof input === "string" ? input.trim() : ""
+        return text ? runV2Command(context, cmd, text) : runV2Control(context, cmd)
+      },
+    })),
+  }))
+  // The typed API returns void (the host owns layer disposal as the owning
+  // component), but honor an unsubscribe if a host build returns one —
+  // setup hands whatever it gets back to the host for disposal.
+  return typeof registered === "function" ? (registered as Plugin.Cleanup) : undefined
+}
+
+const entry: TuiPluginModule & Plugin.Definition = {
+  id: "opencode-peers",
+  tui: async (api) => {
+    const unregister = api.keymap.registerLayer({
+      priority: LAYER_PRIORITY,
+      commands: COMMANDS.map(({ cmd, title, desc }) => ({
+        namespace: "palette",
+        name: `opencode-peers.${cmd}`,
+        title,
+        desc,
+        // No slashName on purpose: slash entries would add a second,
+        // duplicate row to the autocomplete menu. Instant execution comes
+        // from the Enter binding below; these stay reachable via the
+        // command palette.
+        run: () => runControl(api, cmd),
+      })),
+      bindings: [{ key: "return", cmd: (ctx: { focused: unknown }) => onEnter(api, ctx) }],
+    })
+    api.lifecycle.onDispose(() => unregister())
+    void refreshOtherNames(api)
+  },
+  setup: v2Setup,
+}
+
+export default entry

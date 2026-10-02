@@ -1,0 +1,95 @@
+{
+  "name": "opencode-peers",
+  "version": "0.1.0",
+  "description": "Cross-session messaging for opencode (one package for v1 and v2 hosts) — let independent sessions discover and text each other, modeled after Claude Code's cross-session messaging",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./tui": {
+      "types": "./dist/tui.d.ts",
+      "import": "./dist/tui.js"
+    },
+    "./commands/peers.md": "./commands/peers.md",
+    "./commands/list-agents.md": "./commands/list-agents.md",
+    "./commands/peers-name.md": "./commands/peers-name.md",
+    "./commands/peers-inbox.md": "./commands/peers-inbox.md",
+    "./commands/peers-outbox.md": "./commands/peers-outbox.md",
+    "./commands/*": "./commands/*"
+  },
+  "files": [
+    "dist",
+    "commands",
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "claude-code",
+    "cross-session",
+    "messaging",
+    "multi-agent",
+    "ai-coding-agent"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "Kernel Pryanic aka Daniil Trishkin"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chinese-room-solutions/opencode-peers.git"
+  },
+  "bugs": {
+    "url": "https://github.com/chinese-room-solutions/opencode-peers/issues"
+  },
+  "homepage": "https://github.com/chinese-room-solutions/opencode-peers#readme",
+  "engines": {
+    "node": ">=18",
+    "opencode": ">=1.18.29"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "dry-run": "npm publish --dry-run",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.18.29"
+  },
+  "dependencies": {
+    "@opencode/plugin": "^2.0.19",
+    "zod": "~4.1.8"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.18.0",
+    "@opencode/client": "^2.0.19",
+    "@opentui/core": "^0.5.12",
+    "@opentui/keymap": "^0.5.12",
+    "@opentui/solid": "^0.5.12",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.4.0"
+  },
+  "opencode": {
+    "plugin": true,
+    "commands": [
+      "commands/peers.md",
+      "commands/list-agents.md",
+      "commands/peers-name.md",
+      "commands/peers-inbox.md",
+      "commands/peers-outbox.md"
+    ]
+  }
+}

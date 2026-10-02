@@ -1,0 +1,83 @@
+import { homedir } from "node:os"
+import { basename, join } from "node:path"
+import type { PeerPermissionMode, PluginConfig } from "./types.js"
+
+export interface ResolvedConfig {
+  storageDir: string
+  peersDir: string
+  inboxFile: string
+  spoolDir: string
+  name: string | undefined
+  inboundPolicy: "accept" | "auto" | "hold" | "refuse"
+  peerPermissions: PeerPermissionMode
+  heartbeatMs: number
+  staleMs: number
+  maxQueue: number
+  maxHeld: number
+  maxMessageBytes: number
+  heldExpiryMs: number
+  maxMessageAgeMs: number
+  sendRatePerMin: number
+  recvRatePerMin: number
+  sweepMs: number
+}
+
+export function defaultDataDir(env: NodeJS.ProcessEnv = process.env): string {
+  const xdg = env.XDG_DATA_HOME
+  if (xdg && xdg.trim()) return xdg
+  return join(homedir(), ".local", "share")
+}
+
+export function resolveConfig(
+  opts: Partial<PluginConfig> | undefined,
+  env: NodeJS.ProcessEnv = process.env
+): ResolvedConfig {
+  const storageDir =
+    opts?.storageDir || join(defaultDataDir(env), "opencode-peers")
+  return {
+    storageDir,
+    peersDir: join(storageDir, "peers.d"),
+    inboxFile: join(storageDir, "inbox.json"),
+    spoolDir: join(storageDir, "spool"),
+    name: opts?.name,
+    inboundPolicy: opts?.inboundPolicy ?? "accept",
+    peerPermissions: opts?.peerPermissions ?? "allow",
+    heartbeatMs: opts?.heartbeatMs ?? 10_000,
+    staleMs: opts?.staleMs ?? 60_000,
+    maxQueue: opts?.maxQueue ?? 50,
+    maxHeld: opts?.maxHeld ?? 100,
+    maxMessageBytes: opts?.maxMessageBytes ?? 8192,
+    heldExpiryMs: opts?.heldExpiryMs ?? 300_000,
+    maxMessageAgeMs: opts?.maxMessageAgeMs ?? 300_000,
+    sendRatePerMin: opts?.sendRatePerMin ?? 10,
+    recvRatePerMin: opts?.recvRatePerMin ?? 20,
+    sweepMs: opts?.sweepMs ?? 15_000,
+  }
+}
+
+const NAME_RE = /^[A-Za-z0-9 _-]{1,32}$/
+const RESERVED_NAME_PREFIXES = ["ses_", "session-", "workspace-"]
+
+export function validateName(name: string): string | null {
+  if (!NAME_RE.test(name)) {
+    return "Name must be 1-32 chars of [A-Za-z0-9 _-] (no newlines or symbols)."
+  }
+  if (RESERVED_NAME_PREFIXES.some((prefix) => name.startsWith(prefix))) {
+    return "Name must not start with ses_, session-, or workspace- (reserved for endpoint IDs)."
+  }
+  return null
+}
+
+/**
+ * Auto-generate a peer display name in Claude Code's `<dir>-<hex>` pattern
+ * (e.g. `my-app-a3f2`). The suffix is derived from the per-process instanceId
+ * so that two opencode instances opened in the same directory are
+ * distinguishable in /peers and addressable by name without ambiguity.
+ * The total length stays within the 32-char validateName limit.
+ */
+export function defaultPeerName(directory: string, instanceId: string): string {
+  const dirName = basename(directory) || "opencode"
+  const maxBase = 27 // 32 - 5 ("-XXXX")
+  const base = dirName.length > maxBase ? dirName.slice(0, maxBase) : dirName
+  return `${base}-${instanceId.slice(-4)}`
+}
