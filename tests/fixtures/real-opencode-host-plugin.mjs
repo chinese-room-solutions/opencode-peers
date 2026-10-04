@@ -23,9 +23,21 @@ export const plugin = {
     const inboundPolicy = process.env.PEERS_FIXTURE_INBOUND_POLICY ?? "accept"
     const replies = []
     const assistantParents = new Map()
+    // Synthetic session.status events (below) never reach the real server, so
+    // its status snapshot must be overlaid to match — otherwise the plugin's
+    // sweep poll resets the synthetic busy state to idle within one sweep.
+    const statusOverlay = new Map()
 
     const sessionClient = new Proxy(ctx.client.session, {
       get(target, property) {
+        if (property === "status") {
+          return async (args) => {
+            const response = await target.status(args)
+            const data = { ...(response?.data ?? {}) }
+            for (const [sessionId, status] of statusOverlay) data[sessionId] = status
+            return { ...response, data }
+          }
+        }
         if (property === "message") {
           return async (args) => {
             const messageID = args?.path?.messageID
@@ -75,7 +87,15 @@ export const plugin = {
         }
         const body = await readJson(request)
         if (request.url === "/event") {
-          await hooks.event?.({ event: body.event })
+          const event = body.event ?? {}
+          const properties = event.properties ?? {}
+          if (event.type === "session.status" && properties.sessionID) {
+            statusOverlay.set(properties.sessionID, properties.status ?? { type: "busy" })
+          }
+          if (event.type === "session.idle" && properties.sessionID) {
+            statusOverlay.delete(properties.sessionID)
+          }
+          await hooks.event?.({ event })
           response.end(JSON.stringify({ ok: true }))
           return
         }
