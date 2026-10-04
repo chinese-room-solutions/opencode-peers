@@ -188,6 +188,7 @@ test("real OpenCode v2 hosts: plugin activation, registry discovery, cross-insta
     return t.skip(`opencode is not v2 (got "${versionOut}"); the v2 plugin entry needs an opencode v2 host`)
   }
 
+  await mkdir("/tmp/opencode", { recursive: true })
   const root = await mkdtemp(join("/tmp/opencode", "peers-real-v2-"))
   const dataDir = join(root, "data")
   const runtimeDir = join(root, "runtime")
