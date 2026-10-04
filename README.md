@@ -169,6 +169,11 @@ The suite includes real-host integration tests that spawn actual
 v1 binary, `tests/real-opencode-v2.test.mjs` an opencode v2 binary — each
 skips with a message when its host isn't on PATH.
 
+CI (`.github/workflows/ci.yml`) runs the suite on Linux twice — once against
+a pinned opencode v1 host, once against a pinned v2 host. Pushing a version
+tag (e.g. `v0.1.0`, matching `package.json`) builds the tarball and publishes
+a GitHub release with it (`.github/workflows/release.yml`).
+
 ## Credits
 
 This project is a standalone continuation of

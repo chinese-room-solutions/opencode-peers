@@ -1,0 +1,44 @@
+name: ci
+
+# Linux only: the real-host suites assert Unix-domain-socket transport and
+# spawn local `opencode serve` processes — no credentials, no model turns
+# (delivery is synthetic). Only one `opencode` binary can be on PATH at a
+# time, so the suite runs twice: against a pinned v1 host, then a pinned v2
+# host. Each real suite self-skips against the wrong host.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Pinned to the versions the suites are verified against; bump
+      # deliberately when the local dev versions move.
+      - name: Install opencode v1 host
+        run: npm install -g opencode-ai@1.18.30
+      - name: Unit + v1 real-host suite
+        run: npm test
+      - name: Swap in opencode v2 host
+        run: |
+          npm uninstall -g opencode-ai
+          npm install -g @opencode/cli@2.0.22
+          opencode --version
+      - name: Unit + v2 real-host suite
+        run: npm test
