@@ -143,7 +143,7 @@ function v2Message(from, to, id, text) {
   }
 }
 
-test("real OpenCode hosts provide busy exact injection, restart recovery, permission boundaries, v1 interop, and held command ACKs", { timeout: 60_000 }, async (t) => {
+test("real OpenCode hosts provide busy exact injection, restart recovery, permission boundaries, v1 interop, and held command ACKs", { timeout: 120_000 }, async (t) => {
   if (process.platform === "win32") return t.skip("transport liveness assertions are UDS-specific; POSIX-only for now")
   const found = spawnSync("which", ["opencode"], { encoding: "utf8" })
   if (found.status !== 0 || !found.stdout.trim()) return t.skip("opencode binary is unavailable")
@@ -240,10 +240,12 @@ test("real OpenCode hosts provide busy exact injection, restart recovery, permis
     listUrl.searchParams.set("directory", beta.directory)
     await (await fetch(listUrl)).json()
     try {
+      // The kill lands mid-spool-write, so recovery must first let the dead
+      // process's lock ticket age out (LOCK_STALE_MS, 30s in queue.ts).
       entries = await waitFor(async () => {
         const all = await registryEntries(peersDir)
         return newest(all, (entry) => entry.version === 2 && entry.sessionId === betaTwo.id && alive(entry) && existsSync(entry.transport.path ?? "")) ? all : null
-      }, 30_000)
+      }, 60_000)
     } catch (error) {
       const snapshot = await registryEntries(peersDir)
       throw new Error(`restart discovery failed: ${error}; registry=${JSON.stringify(snapshot)}; logs=${beta.logs()}`)
