@@ -473,6 +473,7 @@ test("v2 tool transform registers the three peer tools with JSON Schema inputs",
   registerPeerTools(editor, deps)
 
   assert.deepEqual(editor.added.map((tool) => tool.name).sort(), ["list_agents", "peer_message_status", "send_message"])
+  for (const tool of editor.added) assert.deepEqual(tool.options, { codemode: false })
   const send = editor.added.find((tool) => tool.name === "send_message")
   assert.equal(send.input.type, "object")
   assert.equal(send.input.properties.to.type, "string")

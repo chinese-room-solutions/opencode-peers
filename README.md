@@ -25,7 +25,9 @@ One package supports both hosts: OpenCode 2.x (v2 plugin API) and opencode
 
 - **`list_agents` / `send_message` tools** — the agent discovers peers and
   texts them. Every message carries a tracking ID, and `peer_message_status`
-  distinguishes transport receipt from final delivery.
+  distinguishes transport receipt from final delivery. On OpenCode 2.x the
+  tools are direct model tool calls (not Code Mode catalog entries), matching
+  the v1 host.
 - **Instant delivery, even while busy** — accepted messages are injected immediately while the target session is busy, as synthetic user
   messages (`promptAsync` on v1, `ctx.session.synthetic` on v2), one host
   call per message. The sender keeps a pending final ACK until delivery
