@@ -1,6 +1,6 @@
 {
   "name": "opencode-peers",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Cross-session messaging for opencode (one package for v1 and v2 hosts) — let independent sessions discover and text each other, modeled after Claude Code's cross-session messaging",
   "type": "module",
   "main": "./dist/index.js",
