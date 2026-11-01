@@ -99,7 +99,7 @@ test("competing processes serialize maxQueue admission", async () => {
     assert.equal(results.filter((result) => result.accepted).length, 1)
     assert.equal((await readdir(join(dir, "spool", "shared-endpoint", "queued"))).length, 1)
   } finally {
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
   }
 })
 
@@ -145,7 +145,7 @@ test("stale cleanup preserves a fresh owner and waits for its release", {
     holder?.child.kill("SIGCONT")
     holder?.child.kill()
     contender?.child.kill()
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
   }
 })
 
@@ -160,7 +160,7 @@ test("competing processes accept a sender/message id only once", async () => {
     assert.equal(results.filter((result) => result.accepted).length, 1)
     assert.equal((await readdir(join(dir, "spool", "shared-endpoint", "queued"))).length, 1)
   } finally {
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
   }
 })
 
@@ -176,7 +176,7 @@ test("competing processes do not overwrite an accepted id with refusal", async (
     const persisted = await Promise.all(["queued", "held", "inflight", "done"].map((state) => readdir(join(spool, state))))
     assert.equal(persisted.flat().filter((file) => file.endsWith(".json")).length, 1)
   } finally {
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
   }
 })
 
@@ -191,6 +191,6 @@ test("competing processes serialize maxHeld admission", async () => {
     assert.equal(results.filter((result) => result.accepted).length, 1)
     assert.equal((await readdir(join(dir, "spool", "shared-endpoint", "held"))).length, 1)
   } finally {
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
   }
 })
