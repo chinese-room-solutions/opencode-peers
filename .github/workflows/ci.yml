@@ -34,11 +34,18 @@ jobs:
       - name: Install opencode v1 host
         run: npm install -g opencode-ai@1.18.30
       - name: Unit + v1 real-host suite
-        run: npm test
+        # Direct node invocation: npm's config parser eats `-- --test-force-exit`,
+        # and the flag (Node >= 22.14) keeps a leaked handle in a finished test
+        # file from pinning a runner slot until the job timeout.
+        run: |
+          npm run build
+          node --test --test-force-exit tests/*.test.mjs
       - name: Swap in opencode v2 host
         run: |
           npm uninstall -g opencode-ai
           npm install -g @opencode/cli@2.0.22
           opencode --version
       - name: Unit + v2 real-host suite
-        run: npm test
+        run: |
+          npm run build
+          node --test --test-force-exit tests/*.test.mjs
