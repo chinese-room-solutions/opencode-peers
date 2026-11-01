@@ -36,7 +36,7 @@ import assert from "node:assert/strict"
 import { spawn, spawnSync } from "node:child_process"
 import { once } from "node:events"
 import { existsSync } from "node:fs"
-import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from "node:fs/promises"
+import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -174,7 +174,7 @@ function v2Message(from, to, id, text) {
   }
 }
 
-test("real OpenCode v2 hosts: plugin activation, registry discovery, cross-instance delivery with final ACK, dedup, busy injection, and restart recovery", { timeout: 90_000 }, async (t) => {
+test("real OpenCode v2 hosts: plugin activation, registry discovery, cross-instance delivery with final ACK, dedup, busy injection, and restart recovery", { timeout: 120_000 }, async (t) => {
   if (process.platform === "win32") {
     return t.skip("transport assertions are Unix-domain-socket specific; POSIX-only for now")
   }
@@ -352,6 +352,17 @@ test("real OpenCode v2 hosts: plugin activation, registry discovery, cross-insta
 
     // ---- 6. restart recovery -------------------------------------------------
     await stopOpenCode(alpha)
+    // SIGKILL can land while the plugin holds the endpoint lock; the orphaned
+    // ticket must age past LOCK_STALE_MS (30s, src/queue.ts) before enqueue
+    // can steal it — withEndpointLock waits only LOCK_WAIT_MS (5s).
+    const ticketsDir = join(pluginStorage, "spool", alphaSession.id, ".lock-tickets")
+    await waitFor(async () => {
+      const tickets = await readdir(ticketsDir).catch(() => [])
+      for (const ticket of tickets) {
+        if (Date.now() - (await stat(join(ticketsDir, ticket))).mtimeMs <= 30_000) return false
+      }
+      return true
+    }, 35_000)
     // Arrange durable pending state for the dead instance: a queued spool
     // record for its previous session (written with the plugin's own queue
     // implementation against the shared storage dir; alpha is dead so there
